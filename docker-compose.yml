@@ -1,0 +1,91 @@
+volumes:
+  kc_db_data:
+  kc_data:
+
+services:
+
+  postgres-keycloak:
+    image: ${PG_IMAGE}
+    container_name: kc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB}
+      TZ: ${TZ}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - kc_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: ${KC_IMAGE}
+    container_name: keycloak
+    restart: unless-stopped
+    depends_on:
+      postgres-keycloak:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PW}
+      # DB
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${PG_DB}
+      KC_DB_USERNAME: ${PG_USER}
+      KC_DB_PASSWORD: ${PG_PASSWORD}
+      # HTTP & hostname pubblico
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:9000
+      KC_PROXY: edge
+      # Management interface
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      # Pool DB (Agroal) per 100–1000 utenti
+      KC_DB_POOL_INITIAL_SIZE: "5"
+      KC_DB_POOL_MIN_SIZE: "5"
+      KC_DB_POOL_MAX_SIZE: "20"
+      # Tuning JVM light
+      JAVA_OPTS_APPEND: "-XX:MaxRAMPercentage=70 -XX:InitialRAMPercentage=50 -Duser.timezone=${TZ}"
+      TZ: ${TZ}
+    command:
+      - start
+      - --import-realm # solo al primo avvio se monti un realm
+    ports:
+      - "9000:8080"   # Keycloak (HTTP)
+      - "9001:9000"   # Management: /health, /metrics
+    volumes:
+      # importa il/ i realm all'avvio
+      - ./autenticazione/realm:/opt/keycloak/data/import
+      # temi custom
+      - ./autenticazione/themes:/opt/keycloak/themes
+      # dati server (per import già processati, ecc.)
+      - kc_data:/opt/keycloak/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -fsS http://localhost:9001/health/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+
+  bff:
+    build:
+      context: ./autenticazione/bff
+      dockerfile: Dockerfile
+    container_name: bff
+    restart: unless-stopped
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      TZ: ${TZ}
+      # OAuth2
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET}
+      PROVIDER_KEYCLOAK_URI: http://keycloak:9000/realms/opes
+    ports:
+      - "8080:8080"
+    command: ["java", "-jar", "/app/app.jar"]
+
+
