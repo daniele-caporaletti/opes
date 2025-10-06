@@ -61,7 +61,7 @@ services:
       # importa il/ i realm all'avvio
       - ./autenticazione/realm:/opt/keycloak/data/import
       # temi custom
-      - ./autenticazione/themes:/opt/keycloak/themes
+      - ./autenticazione/themes:/opt/keycloak/providers/
       # dati server (per import già processati, ecc.)
       - kc_data:/opt/keycloak/data
     healthcheck:
@@ -69,23 +69,5 @@ services:
       interval: 10s
       timeout: 3s
       retries: 30
-
-  bff:
-    build:
-      context: ./autenticazione/bff
-      dockerfile: Dockerfile
-    container_name: bff
-    restart: unless-stopped
-    depends_on:
-      keycloak:
-        condition: service_started
-    environment:
-      TZ: ${TZ}
-      # OAuth2
-      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET}
-      PROVIDER_KEYCLOAK_URI: http://keycloak:9000/realms/opes
-    ports:
-      - "8080:8080"
-    command: ["java", "-jar", "/app/app.jar"]
 
 
