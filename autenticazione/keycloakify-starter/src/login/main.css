@@ -1,0 +1,208 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500&display=swap');
+
+
+
+@media (max-width: 767px) {
+  #kc-header-wrapper {
+    display: flex;
+    justify-content: center; /* centro orizzontale */
+    padding: 10px !important; /* padding per mobile */
+    align-items: center !important; /* centra il logo */
+    min-height: 80px;         /* opzionale: altezza area header */
+  }
+  #kc-header-wrapper img {
+    display: block;   /* evita lo spazio extra inline */
+    max-width: 100%;
+    height: auto;
+    width: 50%
+  }
+}
+
+/*CHECKBOX - start*/
+  input[type="checkbox"] {
+    accent-color: #06a854;   /* verde al checked/focus */
+    width: 14px;             /* ingrandisce il quadratino */
+    height: 14px;
+    /* fallback per browser che ignorano width/height sul checkbox */
+    transform: scale(1.15);
+    transform-origin: left center;
+    vertical-align: middle;
+  }
+/*CHECKBOX - start*/
+
+.kcInputClass::placeholder {
+  color: #9aa3a9;   /* grigio leggibile */
+  opacity: 1;       /* evita che alcuni browser lo schiariscano troppo */
+}
+
+.kcInputClass:focus::placeholder {
+  color: #b6c3c9;   /* leggermente diverso in focus, se ti piace */
+}
+
+.kcFormCardClass {
+  box-shadow: none !important; /* rimuove l'ombra */
+  border-top: 0 !important; /* rimuove la linea superiore */
+  border-color: none !important; /* rimuove il bordo blu */
+}
+
+.kcInfoAreaWrapperClass {
+  background-color: transparent !important; /* sfondo trasparente */
+}
+
+.kcContentWrapperClass .col-md-10 {
+  padding: 0 !important; /* rimuove il padding */
+}
+
+#kc-page-title {
+  font-family: 'Poppins', system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 500;      /* Medium */
+  font-size: 32px;
+  line-height: 1.25;        /* 100% */
+  letter-spacing: 0;     /* 0% */
+  color: #1B323E;
+  margin-bottom: 8px;
+}
+
+.login-pf-page .login-pf-header h1 {
+  text-align: left;
+}
+
+#kc-form-login {
+  font-family: 'Poppins', system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-weight: 400;
+  letter-spacing: 0;     /* 0% */
+  color: #1B323E;
+  font-size: 16px;
+}
+
+#kc-register-form {
+  font-family: 'Poppins', system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-weight: 400;
+  letter-spacing: 0;     /* 0% */
+  color: #1B323E;
+  font-size: 16px;
+}
+
+#kc-form-options {
+  font-size: 12px;
+  color: #1B323E;
+  letter-spacing: 0%;
+}
+
+#kc-form-options .checkbox {
+  color: #1B323E;
+}
+
+/*LINK - start*/
+  .kcFormOptionsWrapperClass {
+    font-size: 12px;
+    color: #838383;
+    letter-spacing: 0;
+  }
+
+  .kcFormOptionsWrapperClass a:link,
+  .kcFormOptionsWrapperClass a:visited {
+    color: inherit;
+    transition: color .15s ease;
+  }
+
+  .kcFormOptionsWrapperClass a:hover,
+  .kcFormOptionsWrapperClass a:focus,
+  .kcFormOptionsWrapperClass a:active {
+    color: #06a854;
+  }
+
+  .kcFormOptionsWrapperClass a:focus-visible {
+    outline: 2px solid #06a854;
+    outline-offset: 2px;
+  }
+/*LINK - end*/
+
+.kcButtonClass {
+  --btn-bg: #1B323E;        /* colore scuro come nel riferimento */
+  --btn-bg-hover: #223a46;  /* leggermente più chiaro al hover   */
+  --btn-bg-active: #1a2b34; /* più scuro al click                 */
+
+  width: 100%;
+  padding: 20px 22px;
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 500;      /* Medium */
+  font-size: 16px;
+  line-height: 1;
+  color: #fff;
+  background: var(--btn-bg);
+  border: 0;
+  border-radius: 12px;   /* arrotondamento come nell’immagine 1 */
+  box-shadow: none;      /* niente ombra: look piatto */
+  text-transform: none;  /* niente UPPERCASE */
+  cursor: pointer;
+  transition: background-color .15s ease;
+}
+
+.kcButtonClass:hover {
+  background: var(--btn-bg-hover);
+}
+
+.kcButtonClass:active {
+  background: var(--btn-bg-active);
+}
+
+.kcButtonClass:focus-visible {
+  outline: 2px solid #8fb6c7;  /* focus accessibile */
+  outline-offset: 2px;
+}
+
+.kcButtonClass:disabled {
+  background: #2a3e48;
+  color: #b8c3c9;
+  cursor: not-allowed;
+  opacity: .85;
+}
+
+.kcInputClass {
+  border: 1px solid #f6f6f6;  /* bordo grigio chiaro */
+  box-shadow: none;           
+  border-radius: 12px;        
+  padding: 14px 16px;         
+  font-size: 14px;            
+  color: #1B323E;  
+  transition: border-color .15s ease, box-shadow .15s ease;
+  height: auto !important;
+  text-align: left;
+}
+
+.kcInputClass:hover {
+  border-color: #d2dbe2;
+}
+
+.kcInputClass:focus,
+.kcInputClass:focus-visible {
+    height: auto !important;
+    padding-bottom: 14.5px !important;
+}
+#password {
+  border-radius: 12px 0px 0px 12px; 
+}
+
+.kcFormPasswordVisibilityButtonClass {
+  border: 1px solid #f6f6f6 !important;  /* bordo grigio chiaro */
+  box-shadow: none;           
+  border-radius: 0px 12px 12px 0px;        
+  padding: 14px 16px;         
+  font-size: 16px;            
+  transition: border-color .15s ease, box-shadow .15s ease;
+  height: auto !important;
+  text-align: left;
+  background-color: white !important;
+  border-left: 0 !important;
+}
+
+#kc-registration-container {
+  font-size: 14px;
+  letter-spacing: 0%;
+}
+#kc-registration a {
+  color: #1B323E;
+}
+
