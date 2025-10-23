@@ -1,7 +1,7 @@
 volumes:
   kc_db_data:
   kc_data:
-  mongo_data:
+  mysql_data:
 
 services:
 
@@ -81,24 +81,25 @@ services:
       timeout: 3s
       retries: 30
 
-  mongo:
-    image: ${MONGO_IMAGE}
-    container_name: mongo
+  mysql:
+    image: ${MYSQL_IMAGE}
+    container_name: mysql-opex
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "3306:3306"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: opesdb
+      MYSQL_DATABASE: opexdb           # Nome del database
+      MYSQL_USER: ${MYSQL_USER}                   # Utente del database
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}           # Password utente
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD} # Password di root
       TZ: ${TZ}
     volumes:
-      - mongo_data:/data/db
+      - mysql_data:/data/db
     healthcheck:
-      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost --silent"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
 
 
