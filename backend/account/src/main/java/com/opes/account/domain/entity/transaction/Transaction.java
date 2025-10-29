@@ -8,9 +8,14 @@ import com.opes.account.domain.entity.taxonomy.Merchant;
 import com.opes.account.domain.entity.taxonomy.Tag;
 import com.opes.account.domain.enums.TransactionSource;
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.*;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 @Entity
 @Table(
@@ -22,28 +27,36 @@ import java.util.*;
                 @Index(name = "idx_tx_user_transfer", columnList = "user_id,is_transfer")
         }
 )
+@Getter @Setter
 public class Transaction {
 
-    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    // Owner (Keycloak sub)
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id")
+    @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
 
+    // Conto di appartenenza
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "account_id")
+    @JoinColumn(name = "account_id", nullable = false)
     private Account account;
 
+    // Data di contabilizzazione (per “ultime 10 del mese” e aggregazioni)
     @Column(name = "booking_date", nullable = false)
     private LocalDate bookingDate;
 
-    @Column(nullable = false, precision = 18, scale = 2)
-    private BigDecimal amount; // + entrata, - uscita (EUR)
+    // Importo in EUR (MVP): + entrata / - uscita
+    @Column(name = "amount", nullable = false, precision = 18, scale = 2)
+    private BigDecimal amount;
 
-    @Column(columnDefinition = "text")
+    // Nota/descrizione libera
+    @Column(name = "description", columnDefinition = "text")
     private String description;
 
+    // Tassonomia (opzionali)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
@@ -52,27 +65,30 @@ public class Transaction {
     @JoinColumn(name = "merchant_id")
     private Merchant merchant;
 
+    // Trasferimenti (esclusi da KPI): doppia scrittura A->B con stesso group id
     @Column(name = "is_transfer", nullable = false)
-    private boolean transfer;
+    private boolean transfer = false;
 
     @Column(name = "transfer_group_id")
     private String transferGroupId;
 
+    // Rimborsi: positivi collegati a spesa originale (opzionale)
     @Column(name = "is_refund", nullable = false)
-    private boolean refund;
+    private boolean refund = false;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "original_tx_id")
     private Transaction originalTransaction;
 
+    // Provenienza dati
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
-    private TransactionSource source;
+    @Column(name = "source", nullable = false, length = 16)
+    private TransactionSource source = TransactionSource.MANUAL;
 
     @Column(name = "external_id")
     private String externalId;
 
-    // N:M con Tag
+    // Tag (N:M)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "transaction_tag",
@@ -80,36 +96,4 @@ public class Transaction {
             inverseJoinColumns = @JoinColumn(name = "tag_id")
     )
     private Set<Tag> tags = new HashSet<>();
-
-    // getters/setters
-    public UUID getId() { return id; }
-    public void setId(UUID id) { this.id = id; }
-    public AppUser getUser() { return user; }
-    public void setUser(AppUser user) { this.user = user; }
-    public Account getAccount() { return account; }
-    public void setAccount(Account account) { this.account = account; }
-    public LocalDate getBookingDate() { return bookingDate; }
-    public void setBookingDate(LocalDate bookingDate) { this.bookingDate = bookingDate; }
-    public BigDecimal getAmount() { return amount; }
-    public void setAmount(BigDecimal amount) { this.amount = amount; }
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
-    public Category getCategory() { return category; }
-    public void setCategory(Category category) { this.category = category; }
-    public Merchant getMerchant() { return merchant; }
-    public void setMerchant(Merchant merchant) { this.merchant = merchant; }
-    public boolean isTransfer() { return transfer; }
-    public void setTransfer(boolean transfer) { this.transfer = transfer; }
-    public String getTransferGroupId() { return transferGroupId; }
-    public void setTransferGroupId(String transferGroupId) { this.transferGroupId = transferGroupId; }
-    public boolean isRefund() { return refund; }
-    public void setRefund(boolean refund) { this.refund = refund; }
-    public Transaction getOriginalTransaction() { return originalTransaction; }
-    public void setOriginalTransaction(Transaction originalTransaction) { this.originalTransaction = originalTransaction; }
-    public TransactionSource getSource() { return source; }
-    public void setSource(TransactionSource source) { this.source = source; }
-    public String getExternalId() { return externalId; }
-    public void setExternalId(String externalId) { this.externalId = externalId; }
-    public Set<Tag> getTags() { return tags; }
-    public void setTags(Set<Tag> tags) { this.tags = tags; }
 }

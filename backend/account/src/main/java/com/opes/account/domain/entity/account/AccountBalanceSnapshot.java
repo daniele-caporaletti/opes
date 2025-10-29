@@ -2,20 +2,27 @@
 package com.opes.account.domain.entity.account;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "account_balance_snapshot",
-        indexes = @Index(name = "idx_abs_account_asof", columnList = "account_id,as_of"))
+@Table(
+        name = "account_balance_snapshot",
+        indexes = @Index(name = "idx_abs_account_asof", columnList = "account_id,as_of")
+)
+@Getter @Setter
 public class AccountBalanceSnapshot {
 
-    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "account_id")
+    @JoinColumn(name = "account_id", nullable = false)
     private Account account;
 
     @Column(name = "as_of", nullable = false)
@@ -23,14 +30,4 @@ public class AccountBalanceSnapshot {
 
     @Column(name = "balance", nullable = false, precision = 18, scale = 2)
     private BigDecimal balance;
-
-    // getters/setters
-    public UUID getId() { return id; }
-    public void setId(UUID id) { this.id = id; }
-    public Account getAccount() { return account; }
-    public void setAccount(Account account) { this.account = account; }
-    public LocalDateTime getAsOf() { return asOf; }
-    public void setAsOf(LocalDateTime asOf) { this.asOf = asOf; }
-    public BigDecimal getBalance() { return balance; }
-    public void setBalance(BigDecimal balance) { this.balance = balance; }
 }

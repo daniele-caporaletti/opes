@@ -23,3 +23,5 @@ server:
   servlet:
     context-path: /opex/v0
 
+app.seed.enable: true
+

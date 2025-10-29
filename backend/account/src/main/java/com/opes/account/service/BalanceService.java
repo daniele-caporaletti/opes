@@ -1,36 +1,51 @@
 // com/opes/account/service/BalanceService.java
 package com.opes.account.service;
 
-import com.opes.account.domain.entity.account.Account;
 import com.opes.account.domain.entity.account.AccountBalanceSnapshot;
 import com.opes.account.repository.account.AccountBalanceSnapshotRepository;
-import com.opes.account.repository.account.AccountRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.math.BigDecimal;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @Transactional(readOnly = true)
 public class BalanceService {
 
-    private final AccountRepository accountRepository;
-    private final AccountBalanceSnapshotRepository snapshotRepository;
+    private final AccountBalanceSnapshotRepository snapshotRepo;
 
-    public BalanceService(AccountRepository accountRepository, AccountBalanceSnapshotRepository snapshotRepository) {
-        this.accountRepository = accountRepository;
-        this.snapshotRepository = snapshotRepository;
+    public BalanceService(AccountBalanceSnapshotRepository snapshotRepo) {
+        this.snapshotRepo = snapshotRepo;
     }
 
+    /** Total Balance = somma degli ultimi snapshot per ogni account attivo (EUR, MVP). */
     public BigDecimal computeTotalBalance(String userId) {
-        List<Account> accounts = accountRepository.findByUserIdAndActiveTrue(userId);
-        if (accounts.isEmpty()) return BigDecimal.ZERO;
+        return snapshotRepo.sumLatestBalanceForUser(userId);
+    }
 
-        List<java.util.UUID> ids = accounts.stream().map(Account::getId).toList();
-        List<AccountBalanceSnapshot> snaps = snapshotRepository.findLatestByAccountIds(ids);
-        return snaps.stream()
-                .map(AccountBalanceSnapshot::getBalance)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    /** (Opzionale) Dettaglio per conto: ultimo snapshot per ciascun account attivo. */
+    public List<AccountBalanceItem> latestPerAccount(String userId) {
+        return snapshotRepo.findLatestSnapshotsForUserActiveAccounts(userId).stream()
+                .map(AccountBalanceItem::from)
+                .toList();
+    }
+
+    // --- DTO interno leggero ---
+    public record AccountBalanceItem(
+            java.util.UUID accountId,
+            String accountName,
+            BigDecimal balance,
+            LocalDateTime asOf
+    ) {
+        static AccountBalanceItem from(AccountBalanceSnapshot s) {
+            return new AccountBalanceItem(
+                    s.getAccount().getId(),
+                    s.getAccount().getName(),
+                    s.getBalance(),
+                    s.getAsOf()
+            );
+        }
     }
 }

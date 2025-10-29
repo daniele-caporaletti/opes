@@ -4,18 +4,26 @@ package com.opes.account.domain.entity.taxonomy;
 import com.opes.account.domain.entity.AppUser;
 import com.opes.account.domain.enums.CategoryType;
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.UUID;
 
 @Entity
-@Table(name = "category",
-        indexes = @Index(name = "idx_cat_user_type_name", columnList = "user_id,type,name"))
+@Table(
+        name = "category",
+        indexes = @Index(name = "idx_category_user_type_name", columnList = "user_id,type,name")
+)
+@Getter @Setter
 public class Category {
 
-    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    // NULL = categoria di sistema; valorizzato = categoria personalizzata utente
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id") // NULL = categoria di sistema
+    @JoinColumn(name = "user_id")
     private AppUser user;
 
     @Column(nullable = false)
@@ -27,17 +35,5 @@ public class Category {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
-    private Category parent;
-
-    // getters/setters
-    public UUID getId() { return id; }
-    public void setId(UUID id) { this.id = id; }
-    public AppUser getUser() { return user; }
-    public void setUser(AppUser user) { this.user = user; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    public CategoryType getType() { return type; }
-    public void setType(CategoryType type) { this.type = type; }
-    public Category getParent() { return parent; }
-    public void setParent(Category parent) { this.parent = parent; }
+    private Category parent; // opzionale: per gerarchie
 }
