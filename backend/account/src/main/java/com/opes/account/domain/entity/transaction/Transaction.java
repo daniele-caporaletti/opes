@@ -1,7 +1,8 @@
 // com/opes/account/domain/entity/transaction/Transaction.java
 package com.opes.account.domain.entity.transaction;
 
-import com.opes.account.domain.entity.AppUser;
+import com.opes.account.appuser.domain.entity.AppUser;
+import com.opes.account.domain.entity.base.Auditable;
 import com.opes.account.domain.entity.account.Account;
 import com.opes.account.domain.entity.taxonomy.Category;
 import com.opes.account.domain.entity.taxonomy.Merchant;
@@ -10,6 +11,7 @@ import com.opes.account.domain.enums.TransactionSource;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.Check;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -18,17 +20,17 @@ import java.util.Set;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "transaction",
+@Table(name = "transaction",
         indexes = {
                 @Index(name = "idx_tx_user_date", columnList = "user_id,booking_date"),
                 @Index(name = "idx_tx_user_cat_date", columnList = "user_id,category_id,booking_date"),
                 @Index(name = "idx_tx_user_merchant_date", columnList = "user_id,merchant_id,booking_date"),
-                @Index(name = "idx_tx_user_transfer", columnList = "user_id,is_transfer")
-        }
-)
+                @Index(name = "idx_tx_user_transfer", columnList = "user_id,is_transfer"),
+                @Index(name = "idx_tx_account_date", columnList = "account_id,booking_date")
+        })
+@Check(constraints = "amount is not null") // placeholder; scale/segno gestiti a livello applicativo
 @Getter @Setter
-public class Transaction {
+public class Transaction extends Auditable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -44,7 +46,7 @@ public class Transaction {
     @JoinColumn(name = "account_id", nullable = false)
     private Account account;
 
-    // Data di contabilizzazione (per “ultime 10 del mese” e aggregazioni)
+    // Data di contabilizzazione
     @Column(name = "booking_date", nullable = false)
     private LocalDate bookingDate;
 
@@ -93,7 +95,8 @@ public class Transaction {
     @JoinTable(
             name = "transaction_tag",
             joinColumns = @JoinColumn(name = "transaction_id"),
-            inverseJoinColumns = @JoinColumn(name = "tag_id")
+            inverseJoinColumns = @JoinColumn(name = "tag_id"),
+            uniqueConstraints = @UniqueConstraint(name = "uk_tx_tag", columnNames = {"transaction_id","tag_id"})
     )
     private Set<Tag> tags = new HashSet<>();
 }

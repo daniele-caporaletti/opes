@@ -1,236 +1,311 @@
 // com/opes/account/service/SpendingSnapshotService.java
 package com.opes.account.service;
 
-import com.opes.account.repository.taxonomy.CategoryRepository;
-import com.opes.account.repository.taxonomy.MerchantRepository;
-import com.opes.account.repository.taxonomy.TagRepository;
-import com.opes.account.repository.transaction.TransactionRepository;
-import org.springframework.data.domain.PageRequest;
+import com.opes.account.domain.entity.UserPreference;
+import com.opes.account.domain.entity.transaction.Transaction;
+import com.opes.account.repository.TransactionRepository;
+import com.opes.account.repository.UserPreferenceRepository;
+import com.opes.account.web.dto.analytics.SpendingSnapshotResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.ZoneId;
+import java.time.Year;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
+@RequiredArgsConstructor
 public class SpendingSnapshotService {
 
-    private static final ZoneId ZONE = ZoneId.of("Europe/Rome");
-
     private final TransactionRepository txRepo;
-    private final CategoryRepository categoryRepo;
-    private final MerchantRepository merchantRepo;
-    private final TagRepository tagRepo;
+    private final UserPreferenceRepository prefRepo;
 
-    public SpendingSnapshotService(TransactionRepository txRepo,
-                                   CategoryRepository categoryRepo,
-                                   MerchantRepository merchantRepo,
-                                   TagRepository tagRepo) {
-        this.txRepo = txRepo;
-        this.categoryRepo = categoryRepo;
-        this.merchantRepo = merchantRepo;
-        this.tagRepo = tagRepo;
-    }
+    public SpendingSnapshotResponse snapshot(String userId,
+                                             String periodParam,  // auto|week|month|year|custom
+                                             LocalDate customFrom,
+                                             LocalDate customTo,
+                                             String modeParam,    // auto|last|top
+                                             String groupByParam, // category|merchant|tag|account
+                                             Integer limitParam,
+                                             boolean expandTotals) {
 
-    /**
-     * Snapshot per la Home: mese corrente fino a ieri.
-     */
-    public Snapshot getMonthToDate(String userId) {
-        LocalDate today = LocalDate.now(ZONE);
-        LocalDate start = today.withDayOfMonth(1);
-        LocalDate end = today.minusDays(1);
-        if (end.isBefore(start)) end = start; // giorno 1 del mese
+        // 1) Periodo
+        Period p = resolvePeriod(userId, periodParam, customFrom, customTo);
 
-        return compute(userId, start, end);
-    }
+        // 2) Base set per il periodo (no transfer)
+        List<Transaction> all = txRepo.findForAnalytics(userId, p.from, p.to);
 
-    /**
-     * Snapshot generico su un range (utile per viste estese).
-     */
-    public Snapshot compute(String userId, LocalDate start, LocalDate end) {
-        // Totale uscite (denominatore per share%)
-        BigDecimal totalExpenses = nz(txRepo.sumExpensesAbs(userId, start, end));
+        // 3) Modalità (auto/last/top)
+        int txCount30d = (int) txRepo.countNotTransferInRange(userId,
+                LocalDate.now().minusDays(30), LocalDate.now());
 
-        // --- Top Category ---
-        TopItem topCategory = null;
-        var topCatRows = txRepo.topCategoriesByExpense(userId, start, end, PageRequest.of(0, 1));
-        if (!topCatRows.isEmpty()) {
-            UUID catId = (UUID) topCatRows.get(0)[0];
-            BigDecimal amount = nz((BigDecimal) topCatRows.get(0)[1]);
-            String label = resolveCategoryLabel(catId);
-            Double pct = share(amount, totalExpenses);
-            topCategory = new TopItem(catId != null ? catId.toString() : null, label, amount, pct);
+        String mode = switch (safe(modeParam, "auto")) {
+            case "last", "top" -> modeParam.toLowerCase();
+            default -> (txCount30d < 20 ? "last" : "top");
+        };
+
+        String groupBy = safe(groupByParam, "category");
+        int limit = (limitParam == null || limitParam < 1 || limitParam > 10) ? 3 : limitParam;
+
+        // 4) Totali (se richiesti)
+        SpendingSnapshotResponse.Totals totals = null;
+        if (expandTotals) {
+            BigDecimal income = BigDecimal.ZERO;
+            BigDecimal expenses = BigDecimal.ZERO;
+            for (Transaction t : all) {
+                if (t.getAmount().signum() >= 0) income = income.add(t.getAmount());
+                else expenses = expenses.add(t.getAmount());
+            }
+            BigDecimal net = income.add(expenses);
+            totals = new SpendingSnapshotResponse.Totals(
+                    scale2(income), scale2(expenses), scale2(net));
         }
 
-        // --- Top Merchant ---
-        TopItem topMerchant = null;
-        var topMerRows = txRepo.topMerchantsByExpense(userId, start, end, PageRequest.of(0, 1));
-        if (!topMerRows.isEmpty()) {
-            UUID mId = (UUID) topMerRows.get(0)[0];
-            BigDecimal amount = nz((BigDecimal) topMerRows.get(0)[1]);
-            String label = resolveMerchantLabel(mId);
-            Double pct = share(amount, totalExpenses);
-            topMerchant = new TopItem(mId != null ? mId.toString() : null, label, amount, pct);
+        // 5) Items
+        List<SpendingSnapshotResponse.Item> items =
+                "last".equals(mode)
+                        ? buildLastItems(all, groupBy, limit)
+                        : buildTopItems(userId, p, groupBy, limit, all);
+
+        // 6) Output
+        SpendingSnapshotResponse.Period period =
+                new SpendingSnapshotResponse.Period(p.type, p.from.toString(), p.to.toString());
+        SpendingSnapshotResponse.Meta meta = new SpendingSnapshotResponse.Meta(txCount30d);
+
+        return new SpendingSnapshotResponse(mode, period, totals, items, meta);
+    }
+
+    // ---------- Helpers ----------
+
+    private record Period(String type, LocalDate from, LocalDate to) {}
+
+    private Period resolvePeriod(String userId, String periodParam, LocalDate from, LocalDate to) {
+        String effective = periodParam;
+        if (effective == null || effective.isBlank() || "auto".equalsIgnoreCase(effective)) {
+            effective = prefRepo.findByUser_IdAndKey(userId, "period")
+                    .map(UserPreference::getValue)
+                    .map(String::toLowerCase)
+                    .filter(v -> Set.of("week","month","year","custom").contains(v))
+                    .orElse("month");
+        } else {
+            effective = effective.toLowerCase();
         }
 
-        // --- Top Tag ---
-        TopItem topTag = null;
-        var topTagRows = txRepo.topTagsByExpense(userId, start, end, PageRequest.of(0, 1));
-        if (!topTagRows.isEmpty()) {
-            UUID tId = (UUID) topTagRows.get(0)[0];
-            BigDecimal amount = nz((BigDecimal) topTagRows.get(0)[1]);
-            String label = resolveTagLabel(tId);
-            Double pct = share(amount, totalExpenses);
-            topTag = new TopItem(tId != null ? tId.toString() : null, label, amount, pct);
+        LocalDate start;
+        LocalDate end;
+
+        switch (effective) {
+            case "week" -> {
+                LocalDate monday = LocalDate.now().with(DayOfWeek.MONDAY);
+                start = monday;
+                end = monday.plusDays(6);
+            }
+            case "year" -> {
+                int y = Year.now().getValue();
+                start = LocalDate.of(y, 1, 1);
+                end = LocalDate.of(y, 12, 31);
+            }
+            case "custom" -> {
+                if (from == null || to == null || to.isBefore(from)) {
+                    throw new IllegalArgumentException("Periodo custom non valido (from/to)");
+                }
+                start = from; end = to;
+            }
+            default -> { // month
+                LocalDate today = LocalDate.now();
+                start = today.withDayOfMonth(1);
+                end = today.withDayOfMonth(today.lengthOfMonth());
+            }
         }
-
-        // --- Trend (serie giornaliera: mese corrente vs mese precedente allineato) ---
-        Trend trend = buildTrend(userId, start, end);
-
-        return new Snapshot(
-                new Period(start, end),
-                topCategory, topMerchant, topTag,
-                trend
-        );
+        return new Period(effective, start, end);
     }
 
-    // ----------------- Trend helpers -----------------
+    private List<SpendingSnapshotResponse.Item> buildLastItems(List<Transaction> all,
+                                                               String groupBy,
+                                                               int limit) {
+        // Uscite soltanto, escludi refund
+        List<Transaction> expenses = all.stream()
+                .filter(t -> t.getAmount().signum() < 0)
+                .filter(t -> !t.isRefund())
+                .sorted(Comparator.comparing(Transaction::getBookingDate).reversed())
+                .toList();
 
-    private Trend buildTrend(String userId, LocalDate start, LocalDate end) {
-        // Serie corrente
-        var currentPoints = fillSeriesGaps(toPointMap(txRepo.dailyExpensesSeries(userId, start, end)), start, end);
+        // Conteggio per key nel periodo (per oneOff)
+        Map<String, Long> countsByKey = expenses.stream()
+                .collect(Collectors.groupingBy(t -> keyOf(t, groupBy), Collectors.counting()));
 
-        // Serie baseline: stesso numero di giorni del mese precedente
-        long days = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
-        LocalDate prevStart = start.minusMonths(1);
-        LocalDate prevEnd = prevStart.plusDays(days - 1);
-        var prevPoints = fillSeriesGaps(toPointMap(txRepo.dailyExpensesSeries(userId, prevStart, prevEnd)), prevStart, prevEnd);
+        return expenses.stream()
+                .limit(limit)
+                .map(t -> {
+                    String key = keyOf(t, groupBy);
+                    String label = labelOf(t, groupBy, key);
+                    boolean oneOff = countsByKey.getOrDefault(key, 0L) == 1L;
+                    return new SpendingSnapshotResponse.Item(
+                            "transaction",
+                            groupBy,
+                            key,
+                            label,
+                            scale2(t.getAmount()),
+                            t.getBookingDate().toString(),
+                            null, // count
+                            oneOff,
+                            null, // sharePct
+                            null  // trend
+                    );
+                })
+                .toList();
+    }
 
-        // Delta
-        BigDecimal currTotal = currentPoints.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal prevTotal = prevPoints.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal diff = currTotal.subtract(prevTotal);
-        Double deltaPct = prevTotal.compareTo(BigDecimal.ZERO) == 0
-                ? (currTotal.compareTo(BigDecimal.ZERO) == 0 ? 0d : 100d)
-                : diff.divide(prevTotal, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100)).doubleValue();
+    private List<SpendingSnapshotResponse.Item> buildTopItems(String userId,
+                                                              Period p,
+                                                              String groupBy,
+                                                              int limit,
+                                                              List<Transaction> baseAll) {
+        // Totale uscite (assoluto) per share
+        java.math.BigDecimal totalExpenses = baseAll.stream()
+                .filter(t -> t.getAmount().signum() < 0)
+                .map(Transaction::getAmount)
+                .map(java.math.BigDecimal::abs)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
 
-        // Costruzione DTO
-        List<TrendPoint> points = new ArrayList<>();
-        LocalDate d = start;
-        while (!d.isAfter(end)) {
-            points.add(new TrendPoint(d, nz(currentPoints.get(d))));
-            d = d.plusDays(1);
+        // Aggregati correnti
+        List<Object[]> currentRows = "tag".equals(groupBy)
+                ? aggregateTagWithNoTag(userId, p.from, p.to, false)
+                : txRepo.aggregateByKey(userId, p.from, p.to, false, groupBy);
+
+        // Periodo precedente omologo
+        Period prev = previousPeriodLike(p);
+        List<Object[]> prevRows = "tag".equals(groupBy)
+                ? aggregateTagWithNoTag(userId, prev.from, prev.to, false)
+                : txRepo.aggregateByKey(userId, prev.from, prev.to, false, groupBy);
+
+        // Indicizzazione previous per confronto trend
+        java.util.Map<String, java.math.BigDecimal> prevMap = prevRows.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        r -> (String) r[0],
+                        r -> (java.math.BigDecimal) r[1],
+                        (a,b) -> a
+                ));
+
+        return currentRows.stream()
+                .limit(limit)
+                .map(r -> {
+                    String key = (String) r[0];
+                    java.math.BigDecimal amount = (java.math.BigDecimal) r[1];
+                    long count = ((Number) r[2]).longValue();
+
+                    Double share = totalExpenses.compareTo(java.math.BigDecimal.ZERO) == 0
+                            ? 0d
+                            : amount.abs().doubleValue() / totalExpenses.doubleValue();
+
+                    java.math.BigDecimal prevAmt = prevMap.getOrDefault(key, java.math.BigDecimal.ZERO);
+                    java.math.BigDecimal delta = amount.subtract(prevAmt);
+                    Double pct = prevAmt.compareTo(java.math.BigDecimal.ZERO) == 0
+                            ? null
+                            : delta.doubleValue() / Math.abs(prevAmt.doubleValue());
+
+                    return new SpendingSnapshotResponse.Item(
+                            "bucket",
+                            groupBy,
+                            key,
+                            key,
+                            scale2(amount),
+                            null,
+                            count,
+                            (count == 1),
+                            share,
+                            new SpendingSnapshotResponse.Trend(scale2(delta), pct)
+                    );
+                })
+                .toList();
+    }
+
+    // Helper per TAG: aggiunge anche il bucket "—" (no-tag) e ordina per impatto
+    private List<Object[]> aggregateTagWithNoTag(String userId, LocalDate from, LocalDate to, boolean income) {
+        List<Object[]> rows = new java.util.ArrayList<>(txRepo.aggregateByTag(userId, from, to, income));
+        Object[] noTag = txRepo.aggregateNoTagBucket(userId, from, to, income);
+        if (noTag != null && noTag[0] != null) {
+            rows.add(new Object[]{"—", noTag[0], noTag[1]});
         }
-
-        List<TrendPoint> baseline = new ArrayList<>();
-        d = prevStart;
-        while (!d.isAfter(prevEnd)) {
-            baseline.add(new TrendPoint(d, nz(prevPoints.get(d))));
-            d = d.plusDays(1);
-        }
-
-        return new Trend(
-                new Period(start, end),
-                points,
-                baseline,
-                diff, // deltaAbs
-                round1(deltaPct) // deltaPct
-        );
+        return rows.stream()
+                .sorted((a,b) -> ((java.math.BigDecimal)b[1]).abs().compareTo(((java.math.BigDecimal)a[1]).abs()))
+                .toList();
     }
 
-    private static Map<LocalDate, BigDecimal> toPointMap(List<? extends Object> rows) {
-        Map<LocalDate, BigDecimal> map = new HashMap<>();
-        for (Object r : rows) {
-            // r è una proxy che implementa l'interfaccia projection DailyExpensePoint
-            var day = (LocalDate) invokeGetter(r, "getDay");
-            var total = (BigDecimal) invokeGetter(r, "getTotalAbs");
-            map.put(day, nz(total));
-        }
-        return map;
+    private Period previousPeriodLike(Period p) {
+        return switch (p.type) {
+            case "week" -> new Period("week", p.from.minusWeeks(1), p.to.minusWeeks(1));
+            case "year" -> new Period("year",
+                    p.from.minusYears(1).withDayOfYear(1),
+                    p.to.minusYears(1).withDayOfYear(p.to.minusYears(1).lengthOfYear()));
+            case "custom" -> {
+                long days = ChronoUnit.DAYS.between(p.from, p.to) + 1;
+                LocalDate toPrev = p.from.minusDays(1);
+                LocalDate fromPrev = toPrev.minusDays(days - 1);
+                yield new Period("custom", fromPrev, toPrev);
+            }
+            default -> { // month
+                LocalDate pmStart = p.from.minusMonths(1).withDayOfMonth(1);
+                LocalDate pmEnd = pmStart.withDayOfMonth(pmStart.lengthOfMonth());
+                yield new Period("month", pmStart, pmEnd);
+            }
+        };
     }
 
-    // riflette min. per non dipendere direttamente dall'interfaccia del repo in questo file
-    private static Object invokeGetter(Object target, String method) {
-        try { return target.getClass().getMethod(method).invoke(target); }
-        catch (Exception e) { throw new IllegalStateException("Projection mapping failed", e); }
+    private String safe(String v, String def) {
+        return (v == null || v.isBlank()) ? def : v.toLowerCase();
     }
 
-    private static Map<LocalDate, BigDecimal> fillSeriesGaps(Map<LocalDate, BigDecimal> src, LocalDate start, LocalDate end) {
-        Map<LocalDate, BigDecimal> res = new LinkedHashMap<>();
-        LocalDate d = start;
-        while (!d.isAfter(end)) {
-            res.put(d, src.getOrDefault(d, BigDecimal.ZERO));
-            d = d.plusDays(1);
-        }
-        return res;
+    private String scale2(BigDecimal v) {
+        return v.setScale(2, BigDecimal.ROUND_HALF_UP).toPlainString();
     }
 
-    // ----------------- Label resolvers -----------------
-
-    private String resolveCategoryLabel(UUID id) {
-        if (id == null) return "Uncategorized";
-        var rows = categoryRepo.findIdAndNameByIds(Set.of(id));
-        return rows.isEmpty() ? "Category" : String.valueOf(rows.get(0)[1]);
+    private String keyOf(Transaction t, String groupBy) {
+        return switch (groupBy) {
+            case "merchant" -> t.getMerchant() != null ? t.getMerchant().getName() : "—";
+            case "account"  -> t.getAccount().getName();
+            case "tag"      -> (t.getTags() != null && !t.getTags().isEmpty())
+                    ? t.getTags().stream().map(tag -> tag.getName()).sorted().findFirst().orElse("—")
+                    : "—";
+            default         -> t.getCategory() != null ? t.getCategory().getName() : "—";
+        };
     }
 
-    private String resolveMerchantLabel(UUID id) {
-        if (id == null) return "No merchant";
-        var rows = merchantRepo.findIdAndNameByIds(Set.of(id));
-        return rows.isEmpty() ? "Merchant" : String.valueOf(rows.get(0)[1]);
+    private String labelOf(Transaction t, String groupBy, String key) {
+        // per ora label = key; qui potresti applicare formati diversi
+        return key;
     }
 
-    private String resolveTagLabel(UUID id) {
-        if (id == null) return "No tag";
-        var rows = tagRepo.findIdAndNameByIds(Set.of(id));
-        return rows.isEmpty() ? "Tag" : String.valueOf(rows.get(0)[1]);
+    private record Bucket(String key, BigDecimal amount, long count) {}
+    private List<Bucket> mapAgg(List<Object[]> rows) {
+        return rows.stream()
+                .map(r -> new Bucket((String) r[0], (BigDecimal) r[1], ((Number) r[2]).longValue()))
+                .toList();
     }
 
-    // ----------------- utils -----------------
-
-    private static BigDecimal nz(BigDecimal v) { return v == null ? BigDecimal.ZERO : v; }
-
-    private static Double share(BigDecimal part, BigDecimal total) {
-        if (total.compareTo(BigDecimal.ZERO) == 0) return 0d;
-        return part.divide(total, 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100)).setScale(1, RoundingMode.HALF_UP)
-                .doubleValue();
+    private List<Bucket> tagAgg(List<Transaction> txs) {
+        Map<String, BigDecimal> sum = new HashMap<>();
+        Map<String, Long> cnt = new HashMap<>();
+        txs.stream()
+                .filter(t -> t.getAmount().signum() < 0)
+                .forEach(t -> {
+                    if (t.getTags() == null || t.getTags().isEmpty()) {
+                        sum.merge("—", t.getAmount(), BigDecimal::add);
+                        cnt.merge("—", 1L, Long::sum);
+                    } else {
+                        t.getTags().forEach(tag -> {
+                            sum.merge(tag.getName(), t.getAmount(), BigDecimal::add);
+                            cnt.merge(tag.getName(), 1L, Long::sum);
+                        });
+                    }
+                });
+        return sum.entrySet().stream()
+                .sorted((a,b) -> b.getValue().abs().compareTo(a.getValue().abs()))
+                .map(e -> new Bucket(e.getKey(), e.getValue(), cnt.getOrDefault(e.getKey(), 0L)))
+                .toList();
     }
-
-    private static double round1(Double v) {
-        if (v == null) return 0d;
-        return Math.round(v * 10.0) / 10.0;
-    }
-
-    // ================== DTO interni (per non “sporcare” i package web) ==================
-
-    public record Snapshot(
-            Period period,
-            TopItem topCategory,
-            TopItem topMerchant,
-            TopItem topTag,
-            Trend trend
-    ) {}
-
-    public record TopItem(
-            String id,         // UUID string o null
-            String label,      // risolto da repo
-            BigDecimal amount, // totale assoluto speso
-            Double sharePct    // % sul totale uscite periodo
-    ) {}
-
-    public record Trend(
-            Period period,
-            List<TrendPoint> points,        // serie corrente (giorni del periodo)
-            List<TrendPoint> baselinePoints,// serie mese precedente allineata
-            BigDecimal deltaAbs,            // currTotal - prevTotal
-            Double deltaPct                 // in %
-    ) {}
-
-    public record TrendPoint(LocalDate date, BigDecimal expense) {}
-
-    public record Period(LocalDate from, LocalDate to) {}
 }

@@ -1,7 +1,8 @@
 // com/opes/account/domain/entity/taxonomy/Category.java
 package com.opes.account.domain.entity.taxonomy;
 
-import com.opes.account.domain.entity.AppUser;
+import com.opes.account.appuser.domain.entity.AppUser;
+import com.opes.account.domain.entity.base.Auditable;
 import com.opes.account.domain.enums.CategoryType;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -10,12 +11,10 @@ import lombok.Setter;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "category",
-        indexes = @Index(name = "idx_category_user_type_name", columnList = "user_id,type,name")
-)
+@Table(name = "category",
+        indexes = @Index(name = "idx_category_user_type_name", columnList = "user_id,type,name"))
 @Getter @Setter
-public class Category {
+public class Category extends Auditable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -35,5 +34,5 @@ public class Category {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
-    private Category parent; // opzionale: per gerarchie
+    private Category parent; // opzionale: gerarchie
 }

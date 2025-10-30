@@ -1,6 +1,7 @@
 // com/opes/account/domain/entity/account/AccountBalanceSnapshot.java
 package com.opes.account.domain.entity.account;
 
+import com.opes.account.domain.entity.base.Auditable;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -10,12 +11,11 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "account_balance_snapshot",
-        indexes = @Index(name = "idx_abs_account_asof", columnList = "account_id,as_of")
-)
+@Table(name = "account_balance_snapshot",
+        indexes = @Index(name = "idx_abs_account_asof", columnList = "account_id,as_of"),
+        uniqueConstraints = @UniqueConstraint(name = "uk_abs_account_asof", columnNames = {"account_id","as_of"}))
 @Getter @Setter
-public class AccountBalanceSnapshot {
+public class AccountBalanceSnapshot extends Auditable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
