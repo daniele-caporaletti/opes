@@ -1,105 +1,103 @@
+networks:
+  opex-network:
+    driver: bridge
+
 volumes:
   kc_db_data:
   kc_data:
-  mysql_data:
+  app_db_data:
 
 services:
 
+  # ------------------------------------------------------------
+  # DATABASE KEYCLOAK (PostgreSQL)
+  # ------------------------------------------------------------
   postgres-keycloak:
     image: ${PG_IMAGE}
     container_name: kc-postgres
     restart: unless-stopped
+    networks:
+      - opex-network
     environment:
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_DB: ${PG_DB}
+      POSTGRES_USER: ${KEY_PG_USER}
+      POSTGRES_PASSWORD: ${KEY_PG_PASSWORD}
+      POSTGRES_DB: ${KEY_PG_DB}
       TZ: ${TZ}
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - kc_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 30
 
+  # ------------------------------------------------------------
+  # IDENTITY PROVIDER (Keycloak)
+  # ------------------------------------------------------------
   keycloak:
     image: ${KC_IMAGE}
     container_name: keycloak
     restart: unless-stopped
+    networks:
+      - opex-network
     depends_on:
       postgres-keycloak:
         condition: service_healthy
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PW}
-      # DB
+
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${PG_DB}
-      KC_DB_USERNAME: ${PG_USER}
-      KC_DB_PASSWORD: ${PG_PASSWORD}
-      # Management interface
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${KEY_PG_DB}
+      KC_DB_USERNAME: ${KEY_PG_USER}
+      KC_DB_PASSWORD: ${KEY_PG_PASSWORD}
+
+      KC_SPI_THEME_STATIC_MAX_AGE: -1
+      KC_SPI_THEME_CACHE_THEMES: "false"
+      KC_SPI_THEME_CACHE_TEMPLATES: "false"
+
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
+
+      KC_LOG_LEVEL: INFO
     command:
       - start-dev
-      - --import-realm # solo al primo avvio se monti un realm
+      - --import-realm
     ports:
-      - "8081:8080"   # Keycloak (HTTP)
-      - "9000:9000"   # Management: /health, /metrics
+      - "8081:8080"
+      - "9000:9000"
     volumes:
-      # importa il/ i realm all'avvio
       - ./autenticazione/realm:/opt/keycloak/data/import
-      # temi custom
       - ./autenticazione/themes:/opt/keycloak/providers/
-      # dati server (per import già processati, ecc.)
       - kc_data:/opt/keycloak/data
     healthcheck:
-      test: ["CMD", "bash", "-c", "curl -fsS http://localhost:9000/health/ready || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 30
-
-  bff:
-    build:
-      context: ./autenticazione/bff
-      dockerfile: Dockerfile
-    container_name: bff
-    depends_on:
-      keycloak:
-        condition: service_healthy
-    environment:
-      TZ: ${TZ}
-      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET}
-      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/opes
-    ports:
-      - "9090:8080"        # host:container
-    command: ["java", "-jar", "/app/app.jar"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://keycloak:9000/actuator/health/readiness | grep -q '\"status\":\"UP\"'"]
-      interval: 10s
-      timeout: 3s
-      retries: 30
-
-  mysql:
-    image: ${MYSQL_IMAGE}
-    container_name: mysql-opex
-    restart: unless-stopped
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_DATABASE: opexdb           # Nome del database
-      MYSQL_USER: ${MYSQL_USER}                   # Utente del database
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}           # Password utente
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD} # Password di root
-      TZ: ${TZ}
-    volumes:
-      - mysql_data:/data/db
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost --silent"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '200 OK'"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 30
 
-
-
+  # ------------------------------------------------------------
+  # DATABASE APPLICATIVO (PostgreSQL)
+  # ------------------------------------------------------------
+  postgres-opex:
+    image: ${PG_IMAGE}
+    container_name: opex-postgres
+    restart: unless-stopped
+    networks:
+      - opex-network
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${APP_PG_USER}
+      POSTGRES_PASSWORD: ${APP_PG_PASSWORD}
+      POSTGRES_DB: ${APP_PG_DB}
+      TZ: ${TZ}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - app_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

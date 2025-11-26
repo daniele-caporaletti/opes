@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: financial-app-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/opexdb
+    username: opex
+    password: Qm4p8Vn2zA7Lh3Rk9cT5xY
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update # Per ora usiamo update, in prod useremo Flyway
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # L'URL del realm di Keycloak (es. locale o remoto)
+          issuer-uri: http://localhost:8081/realms/opex
+          # Alternativa se usi jwk-set-uri:
+          # jwk-set-uri: http://localhost:8080/realms/tuo-realm/protocol/openid-connect/certs
